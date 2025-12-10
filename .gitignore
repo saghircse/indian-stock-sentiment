@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# HuggingFace cache (optional)
+cache/

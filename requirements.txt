@@ -1,0 +1,10 @@
+gradio
+transformers
+torch
+pandas
+beautifulsoup4
+requests
+fuzzywuzzy
+python-Levenshtein
+lxml
+yfinance
