@@ -1,3 +1,14 @@
+---
+title: Indian Stock Sentiment
+emoji: 🐢
+colorFrom: pink
+colorTo: yellow
+sdk: gradio
+sdk_version: 6.1.0
+app_file: app.py
+pinned: false
+---
+
 # 🇮🇳 Indian Stock Market Sentiment Analyzer
 
 A Gradio-based app to fetch **Indian stock news** and analyze **sentiment** using **FinBERT**.  
@@ -82,3 +93,10 @@ The summary table shows several key metrics for the fetched headlines:
 3. Select the **period** and **number of headlines** to fetch.  
 4. Click **Analyze**.  
 5. View **summary**, **charts**, **headlines table**, and download the CSV.
+
+## Links / Deployment
+
+- **GitHub Repository:** [https://github.com/saghircse/indian-stock-sentiment](https://github.com/saghircse/indian-stock-sentiment)  
+- **Hugging Face Space:** [https://huggingface.co/spaces/saghircse/indian-stock-sentiment](https://huggingface.co/spaces/saghircse/indian-stock-sentiment)  
+- **Live App (Gradio Web):** [https://saghircse-indian-stock-sentiment.hf.space/](https://saghircse-indian-stock-sentiment.hf.space/)  
+
