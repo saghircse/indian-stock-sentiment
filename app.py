@@ -7,8 +7,10 @@ import torch
 from datetime import datetime, timedelta
 import yfinance as yf
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import io
 import base64
+import html
 
 # -----------------------------
 # LOAD TICKERS
@@ -59,10 +61,7 @@ def fetch_news(query, max_items=100):
 def parse_date(date_str):
     if not date_str:
         return None
-    fmts = [
-        "%a, %d %b %Y %H:%M:%S %Z",
-        "%a, %d %b %Y %H:%M:%S %z"
-    ]
+    fmts = ["%a, %d %b %Y %H:%M:%S %Z","%a, %d %b %Y %H:%M:%S %z"]
     for fmt in fmts:
         try:
             return datetime.strptime(date_str, fmt)
@@ -107,199 +106,236 @@ def analyze_sentiment_batch(texts):
 # -----------------------------
 # MAIN PIPELINE
 # -----------------------------
-def run_pipeline(user_input, period_option):
-    period_map = {
-        "Last 7 days": 7,
-        "Last 10 days": 10,
-        "Last 1 month": 30
-    }
-    period_days = period_map.get(period_option, 7)
+def run_pipeline(user_input, period_option, num_news):
+    period_map = {"Last 7 days":7,"Last 10 days":10,"Last 1 month":30}
+    period_days = period_map.get(period_option,7)
 
     # Validate symbol
     valid, symbol, company = get_company_name(user_input)
     if not valid:
-        return f"❌ '{user_input}' is not a valid NSE stock symbol.", "", "", "", ""
+        return f"❌ '{user_input}' is not a valid NSE stock symbol.", "", "", "", "", ""
 
     query = company + " stock"
-    news, total_items = fetch_news(query, max_items=100)
+    news, total_items = fetch_news(query, max_items=int(num_news))
     news = filter_news_by_period(news, period_days=period_days)
 
     if len(news) == 0:
-        return f"No news found for {company} in {period_option}", "", "", "", ""
+        return f"No news found for {company} in {period_option}", "", "", "", "", ""
 
-    info_msg = (
-        f"**Showing {len(news)} out of {total_items} headlines fetched (max 100) "
-        f"from the {period_option.lower()}.**"
-    )
+    fetched_count = min(total_items, int(num_news))
+    info_msg = f"**Showing {len(news)} headlines (filtered by period) out of {fetched_count} headlines fetched (max {num_news}) from the {period_option.lower()}.**"
 
     # Sentiment
     texts = [n["title"] for n in news]
     sentiments = analyze_sentiment_batch(texts)
 
     results = []
-    counts = {"positive": 0, "neutral": 0, "negative": 0}
+    counts = {"positive":0,"neutral":0,"negative":0}
+    overall_sums = {"positive":0.0,"neutral":0.0,"negative":0.0}
+    weighted_counts = {"positive":0.0,"neutral":0.0,"negative":0.0}
     date_sentiments = {}
     date_counts = {}
 
     for item, sent in zip(news, sentiments):
         pos, neu, neg = sent["positive"], sent["neutral"], sent["negative"]
-        overall = round(pos - neg, 3)
-
-        # predicted class
-        pred = max(["positive", "neutral", "negative"], key=lambda k: sent[k])
-        counts[pred] += 1
+        overall = round(pos - neg,3)
+        pred = max(["positive","neutral","negative"], key=lambda k: sent[k])
+        counts[pred] +=1
+        overall_sums[pred] += overall
+        for k in ["positive","neutral","negative"]:
+            weighted_counts[k] += sent[k]
 
         dt = parse_date(item["published"])
-        if not dt:
-            continue
+        if not dt: continue
         date_key = dt.date().isoformat()
-
-        date_sentiments.setdefault(date_key, []).append(overall)
-        date_counts.setdefault(date_key, []).append(pred)
+        date_sentiments.setdefault(date_key,[]).append(overall)
+        date_counts.setdefault(date_key,[]).append(pred)
 
         results.append({
             "headline": item["title"],
-            "positive": round(pos, 3),
-            "neutral": round(neu, 3),
-            "negative": round(neg, 3),
+            "positive": round(pos,3),
+            "neutral": round(neu,3),
+            "negative": round(neg,3),
             "overall": overall,
             "published": item["published"],
             "link": item["link"]
         })
 
     results.sort(key=lambda x: parse_date(x["published"]), reverse=True)
+    avg_overall = {k:(overall_sums[k]/counts[k] if counts[k]>0 else 0.0) for k in counts}
 
     # -----------------------------
-    # Summary
+    # Color-coded summary badges
     # -----------------------------
+    badge_colors = {"positive":"#4CAF50","neutral":"#9E9E9E","negative":"#F44336"}
     summary = f"""
 ### 📊 Sentiment Summary for {company} ({symbol}) — {period_option}
 
-| Sentiment | Count | Percentage |
-|----------|-------|------------|
-| 😊 Positive | {counts['positive']} | {counts['positive']/len(news)*100:.1f}% |
-| 😐 Neutral | {counts['neutral']} | {counts['neutral']/len(news)*100:.1f}% |
-| 😞 Negative | {counts['negative']} | {counts['negative']/len(news)*100:.1f}% |
+| Sentiment | Count | % of Headlines | Avg Overall | Weighted Count |
+|----------|-------|----------------|-------------|----------------|
+| 😊 Positive | <span style='background-color:{badge_colors['positive']};color:white;padding:3px 6px;border-radius:5px'>{counts['positive']}</span> | {counts['positive']/len(news)*100:.1f}% | {avg_overall['positive']:.2f} | {weighted_counts['positive']:.2f} |
+| 😐 Neutral  | <span style='background-color:{badge_colors['neutral']};color:white;padding:3px 6px;border-radius:5px'>{counts['neutral']}</span> | {counts['neutral']/len(news)*100:.1f}% | {avg_overall['neutral']:.2f} | {weighted_counts['neutral']:.2f} |
+| 😞 Negative | <span style='background-color:{badge_colors['negative']};color:white;padding:3px 6px;border-radius:5px'>{counts['negative']}</span> | {counts['negative']/len(news)*100:.1f}% | {avg_overall['negative']:.2f} | {weighted_counts['negative']:.2f} |
 
-**Total Headlines Fetched:** {total_items}  
+**Total Headlines Fetched:** {fetched_count}  
 **Headlines in Period:** {len(news)}
 """
 
     # -----------------------------
-    # HTML TABLE
+    # Headlines table
     # -----------------------------
-    table = "<table style='width:100%; border-collapse: collapse;'>"
-    table += "<tr><th>Headline</th><th>Positive</th><th>Neutral</th><th>Negative</th><th>Overall</th><th>Published</th><th>Link</th></tr>"
-
-    for r in results:
-        color = "green" if r["overall"] > 0 else "red" if r["overall"] < 0 else "black"
-        table += f"<tr>"
-        table += f"<td>{r['headline']}</td>"
+    table = "<table style='width:100%; border-collapse: collapse;'><tr style='background-color:#f2f2f2'><th>Headline</th><th>Positive</th><th>Neutral</th><th>Negative</th><th>Overall (pos-neg)</th><th>Published</th><th>Link</th></tr>"
+    for i,r in enumerate(results):
+        row_color = "#ffffff" if i%2==0 else "#f9f9f9"
+        color = "green" if r["overall"]>0 else "red" if r["overall"]<0 else "black"
+        table += f"<tr style='background-color:{row_color};'>"
+        table += f"<td>{html.escape(r['headline'])}</td>"
         table += f"<td>{r['positive']}</td>"
         table += f"<td>{r['neutral']}</td>"
         table += f"<td>{r['negative']}</td>"
         table += f"<td style='color:{color}; font-weight:bold'>{r['overall']}</td>"
         table += f"<td>{r['published']}</td>"
-        table += f"<td><a href='{r['link']}' target='_blank'>Open</a></td>"
-        table += "</tr>"
-
+        table += f"<td><a href='{r['link']}' target='_blank'>Open</a></td></tr>"
     table += "</table>"
 
+    # CSV download
+    df = pd.DataFrame(results)
+    csv_buf = io.StringIO()
+    df.to_csv(csv_buf,index=False)
+    csv_data = "data:text/csv;base64," + base64.b64encode(csv_buf.getvalue().encode()).decode()
+    csv_link_html = f"<a href='{csv_data}' download='{symbol}_news_sentiment.csv'>⬇️ Download CSV</a>"
+
     # -----------------------------
-    # CHARTS
+    # Charts
     # -----------------------------
-    chart_counts_html = ""
-    chart_sentiment_html = ""
+    chart_counts_html = chart_sentiment_html = chart_price_sentiment_html = ""
 
-    if len(date_sentiments) > 0:
-        dates = sorted(date_sentiments.keys())
-        avg_sentiments = [sum(date_sentiments[d]) / len(date_sentiments[d]) for d in dates]
+    if date_sentiments:
+        # Trading days
+        try:
+            ticker_data = yf.Ticker(symbol+".NS").history(period=f"{period_days}d")
+            trading_dates = [d.date() for d in ticker_data.index]
+        except Exception:
+            trading_dates = [datetime.fromisoformat(d).date() for d in sorted(date_sentiments.keys())]
 
-        pos_counts = [date_counts[d].count("positive") for d in dates]
-        neu_counts = [date_counts[d].count("neutral") for d in dates]
-        neg_counts = [date_counts[d].count("negative") for d in dates]
+        # -----------------------------
+        # Daily Headline Counts
+        # -----------------------------
+        try:
+            pos_counts_aligned = [date_counts.get(d.isoformat(), []).count("positive") for d in trading_dates]
+            neu_counts_aligned = [date_counts.get(d.isoformat(), []).count("neutral") for d in trading_dates]
+            neg_counts_aligned = [date_counts.get(d.isoformat(), []).count("negative") for d in trading_dates]
 
-        # ---- HEADLINE COUNTS (no labels) ----
-        fig1, ax1 = plt.subplots(figsize=(6,4))
-        ax1.bar(dates, pos_counts, color="green", label="Positive")
-        ax1.bar(dates, neu_counts, bottom=pos_counts, color="gray", label="Neutral")
-        ax1.bar(dates, neg_counts, bottom=[p+n for p,n in zip(pos_counts, neu_counts)], color="red", label="Negative")
-        ax1.tick_params(axis='x', rotation=60, labelsize=7)
-        ax1.set_title("Daily Headline Counts")
-        ax1.set_ylabel("Headlines")
-        ax1.legend()
-        plt.tight_layout()
+            fig1, ax1 = plt.subplots(figsize=(6,4))
+            ax1.bar(trading_dates, pos_counts_aligned, color="green", label="Positive")
+            ax1.bar(trading_dates, neu_counts_aligned, bottom=pos_counts_aligned, color="gray", label="Neutral")
+            bottom_sum = [p+n for p,n in zip(pos_counts_aligned, neu_counts_aligned)]
+            ax1.bar(trading_dates, neg_counts_aligned, bottom=bottom_sum, color="red", label="Negative")
 
-        buf1 = io.BytesIO()
-        fig1.savefig(buf1, format="png")
-        buf1.seek(0)
-        chart_counts_html = f"<img src='data:image/png;base64,{base64.b64encode(buf1.read()).decode()}' style='width:100%;'/>"
-        plt.close(fig1)
+            ax1.set_title("Daily Headline Counts")
+            ax1.set_ylabel("Number of Headlines")
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+            fig1.autofmt_xdate(rotation=45)
+            plt.tight_layout()
+            buf1 = io.BytesIO()
+            fig1.savefig(buf1, format="png")
+            buf1.seek(0)
+            chart_counts_html = f"<img src='data:image/png;base64,{base64.b64encode(buf1.read()).decode()}' style='width:100%; max-width:700px; height:auto;'/>"
+            plt.close(fig1)
+        except Exception as e:
+            chart_counts_html = f"<p>Error generating Daily Headline Counts chart: {e}</p>"
 
-        # ---- SENTIMENT TREND (smaller rotated labels) ----
-        fig2, ax2 = plt.subplots(figsize=(6,4))
-        colors = ["green" if x > 0 else "red" if x < 0 else "gray" for x in avg_sentiments]
-        ax2.bar(dates, avg_sentiments, color=colors)
-        ax2.axhline(0, color="black", linestyle="--", linewidth=0.8)
-        ax2.tick_params(axis='x', rotation=60, labelsize=7)
-        ax2.set_title("Daily Sentiment Trend (Overall)")
-        ax2.set_ylabel("Sentiment Score")
+        # -----------------------------
+        # Daily Sentiment Trend
+        # -----------------------------
+        try:
+            aligned_avg_sentiments = [
+                sum(date_sentiments.get(d.isoformat(), []))/len(date_sentiments.get(d.isoformat(), [1]))
+                if date_sentiments.get(d.isoformat(), []) else 0.0
+                for d in trading_dates
+            ]
+            colors = ["green" if x>0 else "red" if x<0 else "gray" for x in aligned_avg_sentiments]
 
-        # Add  ALL labels (small font)
-        for i, val in enumerate(avg_sentiments):
-            ax2.text(
-                i,
-                val + (0.01 if val >= 0 else -0.02),
-                f"{val:.2f}",
-                ha='center', 
-                va='bottom' if val >= 0 else 'top',
-                fontsize=7
-            )
+            fig2, ax2 = plt.subplots(figsize=(6,4))
+            ax2.bar(trading_dates, aligned_avg_sentiments, color=colors)
+            ax2.axhline(0, color="black", linestyle="--", linewidth=0.8)
+            ax2.set_title("Daily Sentiment Trend (Overall)")
+            ax2.set_ylabel("Sentiment Score")
+            ax2.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+            fig2.autofmt_xdate(rotation=45)
+            plt.tight_layout()
+            buf2 = io.BytesIO()
+            fig2.savefig(buf2, format="png")
+            buf2.seek(0)
+            chart_sentiment_html = f"<img src='data:image/png;base64,{base64.b64encode(buf2.read()).decode()}' style='width:100%; max-width:700px; height:auto;'/>"
+            plt.close(fig2)
+        except Exception as e:
+            chart_sentiment_html = f"<p>Error generating Daily Sentiment Trend: {e}</p>"
 
-        plt.tight_layout()
+        # -----------------------------
+        # Stock Price + Sentiment
+        # -----------------------------
+        try:
+            if not ticker_data.empty:
+                fig3, ax3 = plt.subplots(figsize=(6,4))
+                ax3.plot(ticker_data.index, ticker_data['Close'], label="Close Price", color="blue")
 
-        buf2 = io.BytesIO()
-        fig2.savefig(buf2, format="png")
-        buf2.seek(0)
-        chart_sentiment_html = f"<img src='data:image/png;base64,{base64.b64encode(buf2.read()).decode()}' style='width:100%;'/>"
-        plt.close(fig2)
+                sentiment_dates = pd.to_datetime(trading_dates)
+                ax3_twin = ax3.twinx()
+                ax3_twin.plot(sentiment_dates, aligned_avg_sentiments, label="Sentiment Score", color="orange", marker="o")
 
-    return summary, info_msg, chart_counts_html, chart_sentiment_html, table
+                # Combine legends
+                lines, labels = ax3.get_legend_handles_labels()
+                lines2, labels2 = ax3_twin.get_legend_handles_labels()
+                ax3.legend(lines + lines2, labels + labels2, loc="upper left")
 
+                ax3.set_ylabel("Close Price")
+                ax3_twin.set_ylabel("Sentiment Score")
+                ax3.set_title("Daily Stock Price + Sentiment Trend")
+                # Optional subtitle: company
+                ax3.text(0.5, -0.15, f"Company: {company} ({symbol})", ha='center', va='top', transform=ax3.transAxes, fontsize=8)
+                ax3.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+                fig3.autofmt_xdate(rotation=45)
+                plt.tight_layout()
+                buf3 = io.BytesIO()
+                fig3.savefig(buf3, format="png")
+                buf3.seek(0)
+                chart_price_sentiment_html = f"<img src='data:image/png;base64,{base64.b64encode(buf3.read()).decode()}' style='width:100%; max-width:700px; height:auto;'/>"
+                plt.close(fig3)
+        except Exception as e:
+            chart_price_sentiment_html = f"<p>Error generating Stock Price + Sentiment chart: {e}</p>"
+
+    return summary, info_msg, chart_counts_html, chart_sentiment_html, table+"<br>"+csv_link_html, chart_price_sentiment_html
 
 # -----------------------------
-# UI
+# GRADIO UI
 # -----------------------------
 with gr.Blocks(title="🇮🇳 Indian Stock Market Sentiment Analyzer") as ui:
 
     gr.Markdown("<h1 style='text-align:center'>🇮🇳 Indian Stock Market Sentiment Analyzer</h1>")
     gr.Markdown("<p style='text-align:center'>Enter an NSE stock symbol. The app uses FinBERT + Google News to generate sentiment analysis of recent headlines.</p>")
 
-    # First row: input + summary
     with gr.Row():
         with gr.Column(scale=1):
             symbol_in = gr.Textbox(label="Enter Indian Stock Symbol")
-            period_in = gr.Dropdown(
-                ["Last 7 days","Last 10 days","Last 1 month"],
-                value="Last 7 days",
-                label="Select Period"
-            )
+            period_in = gr.Dropdown(["Last 7 days","Last 10 days","Last 1 month"], value="Last 7 days", label="Select Period")
+            num_news_in = gr.Slider(minimum=20, maximum=100, step=1, value=50, label="Number of News Headlines to Fetch")
             btn = gr.Button("Analyze")
         with gr.Column(scale=2):
             summary_out = gr.Markdown()
-
-    info_out = gr.Markdown()
+            info_out = gr.Markdown()
 
     with gr.Row():
-        chart1_out = gr.HTML()
-        chart2_out = gr.HTML()
+        chart1_out = gr.HTML(label="Daily Headline Counts")
+        chart2_out = gr.HTML(label="Daily Sentiment Trend")
+        chart3_out = gr.HTML(label="Daily Stock Price + Sentiment Trend")
 
-    table_out = gr.HTML()
+    table_out = gr.HTML(label="Headlines & Sentiment Table")
 
     btn.click(
         run_pipeline,
-        inputs=[symbol_in, period_in],
-        outputs=[summary_out, info_out, chart1_out, chart2_out, table_out]
+        inputs=[symbol_in, period_in, num_news_in],
+        outputs=[summary_out, info_out, chart1_out, chart2_out, table_out, chart3_out]
     )
 
 ui.launch()
