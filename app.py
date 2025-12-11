@@ -121,7 +121,7 @@ def run_pipeline(user_input, period_option, max_news):
 
     valid, symbol, company = get_company_name(raw_symbol)
     if not valid:
-        return f"❌ '{user_input}' is not a valid NSE stock symbol.", "", "", "", "", ""
+        return f"❌ '{user_input}' is not a valid NSE stock symbol.", "", "", "", "", "", ""
 
     # Fetch news
     query = company + " stock"
@@ -131,7 +131,7 @@ def run_pipeline(user_input, period_option, max_news):
     fetched_count = min(total_items, int(max_news))
 
     if len(news) == 0:
-        return f"No news found for {company} in {period_option}", "", "", "", "", ""
+        return f"No news found for {company} in {period_option}", "", "", "", "", "", ""
 
     info_msg = f"**Showing {len(news)} headlines from the last {period_days} days (fetched {fetched_count} / requested {max_news}).**"
 
@@ -319,13 +319,35 @@ def run_pipeline(user_input, period_option, max_news):
         except Exception:
             chart_price_sentiment_html = ""
 
+    # -----------------------------
+    # KEY METRICS SUMMARY (Markdown)
+    # -----------------------------
+    metrics_summary_text = """
+### 📌 Key Metrics Summary
+
+| Metric | Description |
+|--------|------------|
+| **Count** | Number of headlines predicted as Positive / Neutral / Negative. |
+| **%** | Percentage of headlines in each sentiment category. |
+| **Avg Sentiment (Overall)** | Average **overall score** for headlines in this category. Calculated as **positive probability − negative probability** per headline, then averaged. |
+| **Weighted Count** | Sum of the raw sentiment probabilities for each category across all headlines. Provides a “confidence-weighted” measure of sentiment dominance. |
+| **Overall Score (per headline)** | `positive − negative` probability. Shows whether the headline is more positive or negative. |
+| **Dominant Sentiment (per headline)** | The sentiment with the **highest probability** among positive, neutral, or negative. Highlighted in the table. |
+
+**Charts:**
+- **Daily Headline Counts**: Shows how many headlines per day fall into each sentiment.  
+- **Daily Sentiment Trend**: Shows average overall sentiment per day (positive − negative).  
+- **Stock Price + Sentiment Trend**: Plots stock closing price alongside daily sentiment for easy correlation.  
+"""
+
     return (
         summary,
         info_msg,
         chart_counts_html,
         chart_sentiment_html,
         table + "<br>" + csv_link_html,
-        chart_price_sentiment_html
+        chart_price_sentiment_html,
+        metrics_summary_text
     )
 
 # -----------------------------
@@ -359,12 +381,18 @@ with gr.Blocks(title="Indian Stock Market Sentiment Analyzer") as ui:
         chart2_out = gr.HTML(label="Daily Sentiment Trend")
         chart3_out = gr.HTML(label="Daily Stock Price + Sentiment Trend")
 
-    table_out = gr.HTML(label="Headlines Table")
+    with gr.Row():
+        table_out = gr.HTML(label="Headlines Table")
+
+    # Add metrics summary in a separate row to make it clearly visible
+    with gr.Row():
+        metrics_summary_out = gr.Markdown(label="Key Metrics Summary")
 
     btn.click(
         run_pipeline,
         inputs=[symbol_in, period_in, max_news_in],
-        outputs=[summary_out, info_out, chart1_out, chart2_out, table_out, chart3_out]
+        outputs=[summary_out, info_out, chart1_out, chart2_out, table_out, chart3_out, metrics_summary_out]
     )
 
 ui.launch()
+
