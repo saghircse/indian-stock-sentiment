@@ -133,7 +133,7 @@ def run_pipeline(user_input, period_option, max_news):
     if len(news) == 0:
         return f"No news found for {company} in {period_option}", "", "", "", "", "", ""
 
-    info_msg = f"**Showing {len(news)} headlines from the last {period_days} days (fetched {fetched_count} / requested {max_news}).**"
+    info_msg = f"**Found {len(news)} headlines from the last {period_days} days (fetched {fetched_count} / requested {max_news}).**"
 
     # Sentiment
     texts = [n["title"] for n in news]
@@ -175,22 +175,19 @@ def run_pipeline(user_input, period_option, max_news):
 
     results.sort(key=lambda x: parse_date(x["published"]), reverse=True)
 
-    avg_overall = {k: (overall_sums[k] / counts[k] if counts[k] > 0 else 0.0)
-                   for k in counts}
-
     # -----------------------------
     # SUMMARY
     # -----------------------------
     summary = f"""
 ### 📊 Sentiment Summary for {company} ({symbol}) — {period_option}
 
-| Sentiment | Count | % | Avg Sentiment (Overall) | Weighted Count |
-|----------|-------|------|--------------|-----------|
-| 😊 Positive | {counts['positive']} | {counts['positive']/len(news)*100:.1f}% | {avg_overall['positive']:.2f} | {weighted_counts['positive']:.2f} |
-| 😐 Neutral | {counts['neutral']} | {counts['neutral']/len(news)*100:.1f}% | {avg_overall['neutral']:.2f} | {weighted_counts['neutral']:.2f} |
-| 😞 Negative | {counts['negative']} | {counts['negative']/len(news)*100:.1f}% | {avg_overall['negative']:.2f} | {weighted_counts['negative']:.2f} |
+| Sentiment | Count | Weighted Count |
+|----------|-------|-----------|
+| 😊 Positive | {counts['positive']} | {weighted_counts['positive']:.2f} |
+| 😐 Neutral | {counts['neutral']} | {weighted_counts['neutral']:.2f} |
+| 😞 Negative | {counts['negative']} | {weighted_counts['negative']:.2f} |
+| Total | {len(news)} | {len(news)} |
 
-**Headlines in period:** {len(news)}  
 """
 
     # -----------------------------
@@ -204,7 +201,7 @@ def run_pipeline(user_input, period_option, max_news):
         <th>Positive</th>
         <th>Neutral</th>
         <th>Negative</th>
-        <th>Overall (POS-NEG)</th>
+        <th>Sentiment Score<br>(POS-NEG)</th>
         <th>Link</th>
     </tr>
     """
@@ -261,7 +258,7 @@ def run_pipeline(user_input, period_option, max_news):
         neg_counts = [date_counts[d].count("negative") for d in dates]
 
         # Chart 1
-        fig1, ax1 = plt.subplots(figsize=(6, 4))
+        fig1, ax1 = plt.subplots(figsize=(6, 3))
         ax1.bar(dates, pos_counts, color="green")
         ax1.bar(dates, neu_counts, bottom=pos_counts, color="gray")
         ax1.bar(dates, neg_counts, bottom=[p + n for p, n in zip(pos_counts, neu_counts)], color="red")
@@ -276,7 +273,7 @@ def run_pipeline(user_input, period_option, max_news):
         plt.close(fig1)
 
         # Chart 2
-        fig2, ax2 = plt.subplots(figsize=(6, 4))
+        fig2, ax2 = plt.subplots(figsize=(6, 3))
         colors = ["green" if x > 0 else "red" if x < 0 else "gray" for x in avg_sentiments]
         ax2.bar(dates, avg_sentiments, color=colors)
         ax2.axhline(0, color="black", linestyle="--")
@@ -294,7 +291,7 @@ def run_pipeline(user_input, period_option, max_news):
             ticker_data = yf.Ticker(symbol + ".NS").history(period=f"{period_days}d")
 
             if not ticker_data.empty:
-                fig3, ax3 = plt.subplots(figsize=(6, 4))
+                fig3, ax3 = plt.subplots(figsize=(6, 3))
                 ax3.plot(ticker_data.index, ticker_data['Close'], color="blue", marker="o", label="Close Price")
 
                 sentiment_dates = [pd.to_datetime(d) for d in dates]
@@ -328,16 +325,14 @@ def run_pipeline(user_input, period_option, max_news):
 | Metric | Description |
 |--------|------------|
 | **Count** | Number of headlines predicted as Positive / Neutral / Negative. |
-| **%** | Percentage of headlines in each sentiment category. |
-| **Avg Sentiment (Overall)** | Average **overall score** for headlines in this category. Calculated as **positive probability − negative probability** per headline, then averaged. |
 | **Weighted Count** | Sum of the raw sentiment probabilities for each category across all headlines. Provides a “confidence-weighted” measure of sentiment dominance. |
-| **Overall Score (per headline)** | `positive − negative` probability. Shows whether the headline is more positive or negative. |
+| **Sentiment Score (per headline)** | `positive − negative` probability. Shows whether the headline is more positive or negative. |
 | **Dominant Sentiment (per headline)** | The sentiment with the **highest probability** among positive, neutral, or negative. Highlighted in the table. |
 
 **Charts:**
 - **Daily Headline Counts**: Shows how many headlines per day fall into each sentiment.  
 - **Daily Sentiment Trend**: Shows average overall sentiment per day (positive − negative).  
-- **Stock Price + Sentiment Trend**: Plots stock closing price alongside daily sentiment for easy correlation.  
+- **Daily Stock Price + Sentiment Trend**: Plots stock closing price alongside daily sentiment for easy correlation.  
 """
 
     return (
@@ -361,23 +356,27 @@ with gr.Blocks(title="Indian Stock Market Sentiment Analyzer") as ui:
     with gr.Row():
         with gr.Column(scale=1):
             symbol_in = gr.Textbox(label="Enter Stock Symbol (e.g., RELIANCE, TCS)")
+        with gr.Column(scale=1):
             period_in = gr.Dropdown(
                 ["Last 7 days", "Last 10 days", "Last 1 month"],
                 value="Last 7 days",
                 label="Select Period"
             )
+        with gr.Column(scale=1):
             max_news_in = gr.Slider(
                 minimum=20, maximum=100, step=1, value=50,
                 label="Number of Headlines to Fetch"
             )
             btn = gr.Button("Analyze")
 
-        with gr.Column(scale=2):
-            summary_out = gr.Markdown()
-            info_out = gr.Markdown()
+    with gr.Row():
+        info_out = gr.Markdown()
 
     with gr.Row():
+        summary_out = gr.Markdown()
         chart1_out = gr.HTML(label="Daily Headline Counts")
+        
+    with gr.Row():
         chart2_out = gr.HTML(label="Daily Sentiment Trend")
         chart3_out = gr.HTML(label="Daily Stock Price + Sentiment Trend")
 
