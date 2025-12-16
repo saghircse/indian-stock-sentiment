@@ -295,7 +295,7 @@ def run_pipeline(user_input, period_option, max_news):
 
             if not ticker_data.empty:
                 fig3, ax3 = plt.subplots(figsize=(6, 4))
-                ax3.plot(ticker_data.index, ticker_data['Close'], color="blue", label="Close Price")
+                ax3.plot(ticker_data.index, ticker_data['Close'], color="blue", marker="o", label="Close Price")
 
                 sentiment_dates = [pd.to_datetime(d) for d in dates]
                 ax3_twin = ax3.twinx()
